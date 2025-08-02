@@ -2,12 +2,7 @@
 import time
 import logging
 from functools import wraps
-from config import (
-    DB_RETRY_ATTEMPTS,
-    DB_RETRY_DELAY,
-    DB_RETRY_BACKOFF,
-    DB_RETRY_EXCEPTIONS,
-)
+from config import RETRY_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +10,19 @@ def retry_db_operation(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         last_exception = None
-        delay = DB_RETRY_DELAY
+        delay = RETRY_CONFIG.delay
         
-        for attempt in range(1, DB_RETRY_ATTEMPTS + 1):
+        for attempt in range(1, RETRY_CONFIG.attempts + 1):
             try:
                 return func(*args, **kwargs)
-            except DB_RETRY_EXCEPTIONS as e:
+            except RETRY_CONFIG.exceptions as e:
                 last_exception = e
                 logger.warning(
-                    f"DB operation failed (attempt {attempt}/{DB_RETRY_ATTEMPTS}): {str(e)}"
+                    f"DB operation failed (attempt {attempt}/{RETRY_CONFIG.attempts}): {str(e)}"
                 )
-                if attempt < DB_RETRY_ATTEMPTS:
+                if attempt < RETRY_CONFIG.attempts:
                     time.sleep(delay)
-                    delay *= DB_RETRY_BACKOFF  # Экспоненциальная задержка
+                    delay *= RETRY_CONFIG.backoff  # Экспоненциальная задержка
             except Exception as e:
                 logger.error(f"Non-retryable error in DB operation: {str(e)}")
                 raise

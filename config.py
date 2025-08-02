@@ -1,30 +1,54 @@
 # config.py
 import os
 from datetime import timedelta
-import cx_Oracle
+from dataclasses import dataclass
+from typing import Tuple, Type
+import oracledb
 
-# Oracle DB
-DB_USER = os.getenv("DB_USER", "user")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "pass")
-DB_DSN = os.getenv("DB_DSN", "localhost:1521/XE")
+@dataclass
+class DatabaseConfig:
+    """Конфигурация базы данных."""
+    user: str = os.getenv("DB_USER", "user")
+    password: str = os.getenv("DB_PASSWORD", "pass") 
+    dsn: str = os.getenv("DB_DSN", "localhost:1521/XE")
+    pool_min: int = int(os.getenv("DB_POOL_MIN", "1"))
+    pool_max: int = int(os.getenv("DB_POOL_MAX", "5"))
+    pool_increment: int = int(os.getenv("DB_POOL_INCREMENT", "1"))
 
-# Пул соединений
-POOL_MIN = 1
-POOL_MAX = 5
-POOL_INCREMENT = 1
+@dataclass 
+class RetryConfig:
+    """Конфигурация повторных попыток."""
+    attempts: int = int(os.getenv("DB_RETRY_ATTEMPTS", "3"))
+    delay: float = float(os.getenv("DB_RETRY_DELAY", "1.0"))
+    backoff: float = float(os.getenv("DB_RETRY_BACKOFF", "2.0"))
+    exceptions: Tuple[Type[Exception], ...] = (
+        oracledb.DatabaseError,
+        oracledb.OperationalError,
+        TimeoutError,
+    )
 
-# Таймауты
-PREDICTION_TIMEOUT = 3  # секунды
+@dataclass
+class ProcessingConfig:
+    """Конфигурация обработки данных."""
+    prediction_timeout: int = int(os.getenv("PREDICTION_TIMEOUT", "3"))
+    late_data_tolerance: timedelta = timedelta(hours=int(os.getenv("LATE_DATA_TOLERANCE_HOURS", "24")))
+    min_calibration_devices: int = int(os.getenv("MIN_CALIBRATION_DEVICES", "2"))
 
-# Retry настройки
-DB_RETRY_ATTEMPTS = 3  # Количество попыток
-DB_RETRY_DELAY = 1  # Задержка между попытками в секундах
-DB_RETRY_BACKOFF = 2  # Множитель для экспоненциальной задержки
-DB_RETRY_EXCEPTIONS = (
-    cx_Oracle.DatabaseError,
-    cx_Oracle.OperationalError,
-    TimeoutError,
-)  # Типы исключений для retry
+# Глобальные экземпляры конфигураций
+DB_CONFIG = DatabaseConfig()
+RETRY_CONFIG = RetryConfig()
+PROCESSING_CONFIG = ProcessingConfig()
 
-
-LATE_DATA_TOLERANCE = timedelta(hours=24) # определяет насколько может запоздать поступление данных замера относительно фактического времени
+# Обратная совместимость
+DB_USER = DB_CONFIG.user
+DB_PASSWORD = DB_CONFIG.password  
+DB_DSN = DB_CONFIG.dsn
+POOL_MIN = DB_CONFIG.pool_min
+POOL_MAX = DB_CONFIG.pool_max
+POOL_INCREMENT = DB_CONFIG.pool_increment
+PREDICTION_TIMEOUT = PROCESSING_CONFIG.prediction_timeout
+DB_RETRY_ATTEMPTS = RETRY_CONFIG.attempts
+DB_RETRY_DELAY = RETRY_CONFIG.delay
+DB_RETRY_BACKOFF = RETRY_CONFIG.backoff
+DB_RETRY_EXCEPTIONS = RETRY_CONFIG.exceptions
+LATE_DATA_TOLERANCE = PROCESSING_CONFIG.late_data_tolerance

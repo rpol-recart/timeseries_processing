@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, call
 from datetime import datetime, timedelta
 from oracledb import  Connection, Cursor
 from db.db import DB
-from config import LATE_DATA_TOLERANCE
+from config import PROCESSING_CONFIG
 
 
 # Sample data for testing
@@ -16,12 +16,15 @@ FAKE_MEASUREMENT_TIME = FAKE_PREDICTION_TIME - timedelta(minutes=5)
 def mock_oracledb():
     """Mock oracledb module and config values."""
     with patch("db.db.oracledb") as mock_oracledb, \
-         patch("db.db.DB_USER", "mock_user"), \
-         patch("db.db.DB_PASSWORD", "mock_pass"), \
-         patch("db.db.DB_DSN", "mock_dsn"), \
-         patch("db.db.POOL_MIN", 1), \
-         patch("db.db.POOL_MAX", 10), \
-         patch("db.db.POOL_INCREMENT", 1):
+         patch("db.db.DB_CONFIG") as mock_db_config:
+
+        # Настройка mock_db_config
+        mock_db_config.user = "mock_user"
+        mock_db_config.password = "mock_pass"
+        mock_db_config.dsn = "mock_dsn"
+        mock_db_config.pool_min = 1
+        mock_db_config.pool_max = 10
+        mock_db_config.pool_increment = 1
 
         mock_pool = MagicMock()
         mock_conn = MagicMock(spec=Connection)
@@ -49,15 +52,25 @@ def db_instance(mock_oracledb):
 
 
 def test_init_pool_success(db_instance, mock_oracledb):
-    mock_oracledb.create_pool.assert_called_once_with(
-        user="mock_user",
-        password="mock_pass",
-        dsn="mock_dsn",
-        min=1,
-        max=10,
-        increment=1,
-        getmode=mock_oracledb.PoolGetMode.WAIT,
-    )
+    with patch("db.db.DB_CONFIG") as mock_db_config:
+        mock_db_config.user = "mock_user"
+        mock_db_config.password = "mock_pass"
+        mock_db_config.dsn = "mock_dsn"
+        mock_db_config.pool_min = 1
+        mock_db_config.pool_max = 10
+        mock_db_config.pool_increment = 1
+        
+        db_instance._init_pool()
+        
+        mock_oracledb.create_pool.assert_called_with(
+            user="mock_user",
+            password="mock_pass",
+            dsn="mock_dsn",
+            min=1,
+            max=10,
+            increment=1,
+            getmode=mock_oracledb.PoolGetMode.WAIT,
+        )
 
 
 def test_get_connection_calls_acquire(db_instance):
@@ -161,7 +174,7 @@ def test_fetch_unprocessed_measurements_last24h_with_data(db_instance, caplog):
     assert result[0]["data"] == {"val": 42}
 
     # Check correct query and parameters
-    min_time = FAKE_PREDICTION_TIME - LATE_DATA_TOLERANCE
+    min_time = FAKE_PREDICTION_TIME - PROCESSING_CONFIG.late_data_tolerance
     cursor.execute.assert_any_call("SELECT MAX(prediction_time) FROM table1")
     cursor.execute.assert_any_call(
         """

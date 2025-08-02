@@ -1,6 +1,6 @@
 # db/db.py
 import oracledb
-from config import DB_USER, DB_PASSWORD, DB_DSN, POOL_MIN, POOL_MAX, POOL_INCREMENT, LATE_DATA_TOLERANCE
+from config import DB_CONFIG, PROCESSING_CONFIG
 from utils.retry import retry_db_operation
 import logging
 
@@ -16,17 +16,17 @@ class DB:
     def _init_pool(self):
         """Initialize Oracle connection pool using oracledb."""
         self.pool = oracledb.create_pool(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            dsn=DB_DSN,
-            min=POOL_MIN,
-            max=POOL_MAX,
-            increment=POOL_INCREMENT,
+            user=DB_CONFIG.user,
+            password=DB_CONFIG.password,
+            dsn=DB_CONFIG.dsn,
+            min=DB_CONFIG.pool_min,
+            max=DB_CONFIG.pool_max,
+            increment=DB_CONFIG.pool_increment,
             getmode=oracledb.PoolGetMode.WAIT  # Wait if pool is busy
         )
         logger.info(
             f"Database connection pool initialized: "
-            f"min={POOL_MIN}, max={POOL_MAX}, increment={POOL_INCREMENT}"
+            f"min={DB_CONFIG.pool_min}, max={DB_CONFIG.pool_max}, increment={DB_CONFIG.pool_increment}"
         )
 
     @retry_db_operation
@@ -90,7 +90,7 @@ class DB:
                 return []
 
             max_pred_time = max_pred_time_row[0]
-            min_time = max_pred_time - LATE_DATA_TOLERANCE
+            min_time = max_pred_time - PROCESSING_CONFIG.late_data_tolerance
 
             # Fetch unprocessed measurements
             cursor.execute("""

@@ -1,7 +1,7 @@
 # tests/test_main_flow.py
 import pytest
 from unittest.mock import MagicMock
-from main import main
+from main_old import main
 
 def test_main_no_last_prediction(monkeypatch):
     mock_db = MagicMock()
