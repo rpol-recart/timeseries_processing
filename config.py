@@ -33,11 +33,21 @@ class ProcessingConfig:
     prediction_timeout: int = int(os.getenv("PREDICTION_TIMEOUT", "3"))
     late_data_tolerance: timedelta = timedelta(hours=int(os.getenv("LATE_DATA_TOLERANCE_HOURS", "24")))
     min_calibration_devices: int = int(os.getenv("MIN_CALIBRATION_DEVICES", "2"))
+    
+@dataclass
+class DegradationConfig:
+    "Конфигурация модели деградации"
+    degradation_type:str = os.getenv("DEGRADATION_TYPE", "linear") # avaible values [linear,quadratic]
+    linear_slope_e:float=float(os.getenv("LINEAR_DEGRADATION_SLOPE_E", "0.5"))
+    linear_intercept_e:float=float(os.getenv("LINEAR_DEGRADATION_INTERCEPT_E", "0.5"))
+    linear_slope_i:float=float(os.getenv("LINEAR_DEGRADATION_SLOPE_I", "0.5"))
+    linear_intercept_i:float=float(os.getenv("LINEAR_DEGRADATION_INTERCEPT_I", "0.5"))
 
 # Глобальные экземпляры конфигураций
 DB_CONFIG = DatabaseConfig()
 RETRY_CONFIG = RetryConfig()
 PROCESSING_CONFIG = ProcessingConfig()
+DEGRADATION_CONFIG = DegradationConfig()
 
 # Обратная совместимость
 DB_USER = DB_CONFIG.user

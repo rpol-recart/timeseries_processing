@@ -6,6 +6,7 @@ from services.data_fetcher import DataFetcher
 from services.measurement_processor import MeasurementProcessor
 from services.sensor_calibration_service import SensorCalibrationService
 from services.sensor_change_detector import SensorChangeDetector
+from models.measurement_data import MeasurementData
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,10 @@ class ApplicationService:
     def process_measurements(self) -> None:
         """
         Основной метод обработки измерений:
-        1. Получение контекста последнего предсказания
-        2. Получение новых измерений
-        3. Обработка смены сенсора (если нужно)
-        4. Обработка измерений с предсказаниями
+        1. Получение контекста последнего предсказания.
+        2. Получение новых измерений.
+        3. Разделение пакета измерений по точке смены сенсора.
+        4. Последовательная обработка каждой части пакета с соответствующими параметрами.
         """
         # Шаг 1: Получение контекста
         context = self._get_processing_context()
@@ -36,17 +37,43 @@ class ApplicationService:
             return
             
         # Шаг 2: Получение новых данных
-        measurements = self._get_new_measurements()
-        if not measurements:
+        all_new_measurements = self._get_new_measurements()
+        if not all_new_measurements:
             logger.info("No new measurements to process.")
             return
+
+        current_sensor_id = context["sensor_id"]
+        current_params = (context["param1"], context["param2"])
+
+        # Шаг 3: Разделение пакета по смене сенсора
+        pre_change_batch, post_change_batch = self.sensor_change_detector.partition_by_sensor_change(
+            current_sensor_id, all_new_measurements
+        )
+
+        # Шаг 4.1: Обработка измерений со старого сенсора (если они есть)
+        if pre_change_batch:
+            logger.info(f"Processing {len(pre_change_batch)} measurements for sensor {current_sensor_id} with existing params.")
+            self._process_measurements_with_predictions(pre_change_batch, current_params)
+
+        # Шаг 4.2: Обработка измерений с нового сенсора (если они есть)
+        if post_change_batch:
+            new_sensor_id = post_change_batch[0].sensor_id
+            logger.info(f"Recalibrating for sensor change from {current_sensor_id} to {new_sensor_id}.")
             
-        # Шаг 3: Обработка смены сенсора
-        calibration_params = self._handle_sensor_change(context, measurements)
-        
-        # Шаг 4: Обработка измерений
-        self._process_measurements_with_predictions(measurements, calibration_params)
-        
+            try:
+                # Выполняем калибровку на данных нового сенсора
+                new_params = self.calibration_service.recalibrate_for_sensor_change(
+                    old_sensor=current_sensor_id,
+                    new_sensor=new_sensor_id,
+                    measurements=post_change_batch, # Калибруемся на данных после смены
+                    context=context
+                )
+                logger.info(f"Processing {len(post_change_batch)} measurements for new sensor {new_sensor_id} with new params.")
+                self._process_measurements_with_predictions(post_change_batch, new_params)
+            except Exception as e:
+                logger.error(f"Failed to recalibrate and process for new sensor {new_sensor_id}. "
+                             f"Measurements will be skipped. Error: {e}")
+
     def _get_processing_context(self) -> Optional[dict]:
         """Получение контекста для обработки (последнее предсказание)."""
         last_prediction = self.data_fetcher.get_last_prediction()
@@ -57,36 +84,13 @@ class ApplicationService:
                    f"for sensor {last_prediction['sensor_id']}")
         return last_prediction
         
-    def _get_new_measurements(self) -> list:
+    def _get_new_measurements(self) -> list[MeasurementData]:
         """Получение новых измерений для обработки."""
         measurements = self.data_fetcher.get_new_measurements()
         logger.info(f"Found {len(measurements)} new measurements")
         return measurements
         
-    def _handle_sensor_change(self, context: dict, measurements: list) -> tuple[float, float]:
-        """
-        Обработка смены сенсора и определение параметров калибровки.
-        """
-        current_sensor = context["sensor_id"]
-        current_params = (context["param1"], context["param2"])
-        
-        # Проверка смены сенсора
-        sensor_changed, new_sensor = self.sensor_change_detector.detect_change(
-            current_sensor, measurements
-        )
-        
-        if sensor_changed:
-            logger.info(f"Sensor changed from {current_sensor} to {new_sensor}")
-            return self.calibration_service.recalibrate_for_sensor_change(
-                old_sensor=current_sensor,
-                new_sensor=new_sensor,
-                measurements=measurements,
-                context=context
-            )
-        
-        return current_params
-        
-    def _process_measurements_with_predictions(self, measurements: list, params: tuple[float, float]) -> None:
+    def _process_measurements_with_predictions(self, measurements: list[MeasurementData], params: tuple[float, float]) -> None:
         """Обработка измерений с применением ML-предсказаний."""
         processed_count = self.measurement_processor.process_batch(measurements, params)
         logger.info(f"Successfully processed {processed_count} measurements")
