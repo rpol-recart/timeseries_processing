@@ -11,8 +11,8 @@ class DataFetcher:
     def get_last_prediction(self):
         return self.db.fetch_last_prediction()
 
-    def get_new_measurements(self, last_time):
-        rows = self.db.fetch_new_measurements(last_time)
+    def get_new_measurements(self):
+        rows = self.db.fetch_unprocessed_measurements_last24h()
         measurements = []
         for row in rows:
             try:
