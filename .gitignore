@@ -3,3 +3,4 @@ env/
 */__pycache__/
 credentials/
 .pytest_cache/
+__pycache__/
