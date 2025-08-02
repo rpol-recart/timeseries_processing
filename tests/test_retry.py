@@ -43,6 +43,8 @@ class TestRetryDBOperation:
     def test_raises_last_exception_if_all_attempts_fail(self, mock_sleep, mock_retry_config, caplog):
         """Test that after all retries fail, the last exception is raised."""
         mock_retry_config.attempts = 3
+        mock_retry_config.delay = 0.01
+        mock_retry_config.backoff = 2
         mock_retry_config.exceptions = (OSError,)
         
         mock_func = MagicMock(side_effect=OSError("Always fails"))
@@ -62,6 +64,9 @@ class TestRetryDBOperation:
     @patch("utils.retry.time.sleep")
     def test_does_not_retry_on_non_retryable_exception(self, mock_sleep, mock_retry_config, caplog):
         """Test that non-retryable exceptions (e.g. ValueError) are raised immediately."""
+        mock_retry_config.attempts = 3
+        mock_retry_config.delay = 0.01
+        mock_retry_config.backoff = 2
         mock_retry_config.exceptions = (OSError,)
         
         mock_func = MagicMock(side_effect=ValueError("Invalid data"))
@@ -83,6 +88,9 @@ class TestRetryDBOperation:
     @patch("utils.retry.time.sleep")
     def test_no_retry_if_first_call_succeeds(self, mock_sleep, mock_retry_config):
         """Test that no retry or sleep occurs if the first call succeeds."""
+        mock_retry_config.attempts = 3
+        mock_retry_config.delay = 0.01
+        mock_retry_config.backoff = 2
         mock_retry_config.exceptions = (OSError,)
         
         mock_func = MagicMock(return_value="ok")
@@ -100,6 +108,8 @@ class TestRetryDBOperation:
     def test_logs_warning_on_each_retry(self, mock_sleep, mock_retry_config, caplog):
         """Test that each retry logs a warning."""
         mock_retry_config.attempts = 3
+        mock_retry_config.delay = 0.01
+        mock_retry_config.backoff = 2
         mock_retry_config.exceptions = (OSError,)
         
         mock_func = MagicMock(side_effect=[OSError("Boom"), "success"])
@@ -116,6 +126,9 @@ class TestRetryDBOperation:
     @patch("utils.retry.RETRY_CONFIG")
     def test_preserves_function_metadata(self, mock_retry_config):
         """Test that @wraps preserves function name and doc."""
+        mock_retry_config.attempts = 3
+        mock_retry_config.delay = 0.01
+        mock_retry_config.backoff = 2
         mock_retry_config.exceptions = (OSError,)
         
         @retry_db_operation
