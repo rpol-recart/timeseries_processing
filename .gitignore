@@ -4,3 +4,4 @@ env/
 credentials/
 .pytest_cache/
 __pycache__/
+documentations.md
