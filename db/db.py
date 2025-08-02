@@ -1,38 +1,47 @@
 # db/db.py
-import cx_Oracle
-from config import DB_USER, DB_PASSWORD, DB_DSN, POOL_MIN, POOL_MAX, POOL_INCREMENT,LATE_DATA_TOLERANCE
+import oracledb
+from config import DB_USER, DB_PASSWORD, DB_DSN, POOL_MIN, POOL_MAX, POOL_INCREMENT, LATE_DATA_TOLERANCE
 from utils.retry import retry_db_operation
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class DB:
     def __init__(self):
+        self.pool = None
         self._init_pool()
 
     @retry_db_operation
     def _init_pool(self):
-        self.pool = cx_Oracle.create_pool(
+        """Initialize Oracle connection pool using oracledb."""
+        self.pool = oracledb.create_pool(
             user=DB_USER,
             password=DB_PASSWORD,
             dsn=DB_DSN,
             min=POOL_MIN,
             max=POOL_MAX,
             increment=POOL_INCREMENT,
-            threaded=True
+            getmode=oracledb.PoolGetMode.WAIT  # Wait if pool is busy
         )
-        logger.info("Database connection pool initialized")
+        logger.info(
+            f"Database connection pool initialized: "
+            f"min={POOL_MIN}, max={POOL_MAX}, increment={POOL_INCREMENT}"
+        )
 
     @retry_db_operation
     def get_connection(self):
+        """Acquire a connection from the pool."""
+        if not self.pool:
+            raise RuntimeError("Connection pool is not initialized.")
         return self.pool.acquire()
 
     @retry_db_operation
     def close_pool(self):
-        if hasattr(self, 'pool'):
+        """Close the entire connection pool."""
+        if self.pool:
             self.pool.close()
-            self.pool.wait()
-            logger.info("Database connection pool closed")
+            logger.info("Database connection pool closed.")
 
     @retry_db_operation
     def fetch_last_prediction(self):
@@ -63,7 +72,7 @@ class DB:
             if cursor:
                 cursor.close()
             if conn:
-                self.pool.release(conn)
+                conn.close()  # Return to pool
 
     @retry_db_operation
     def fetch_unprocessed_measurements_last24h(self):
@@ -73,22 +82,17 @@ class DB:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Получаем MAX(prediction_time) из table1
-            cursor.execute("""
-                SELECT MAX(prediction_time) FROM table1
-            """)
+            # Get latest prediction_time
+            cursor.execute("SELECT MAX(prediction_time) FROM table1")
             max_pred_time_row = cursor.fetchone()
             if not max_pred_time_row or not max_pred_time_row[0]:
                 logger.info("No prediction_time found in table1.")
                 return []
 
             max_pred_time = max_pred_time_row[0]
-
-            # Вычисляем min_time = max_pred_time - LATE_DATA_TOLERANCE
-            from config import LATE_DATA_TOLERANCE
             min_time = max_pred_time - LATE_DATA_TOLERANCE
 
-            # Выполняем основной запрос с параметрами
+            # Fetch unprocessed measurements
             cursor.execute("""
                 SELECT t2.sensor_id, t2.device_id, t2.measurement_time, t2.data
                 FROM table2 t2
@@ -97,8 +101,6 @@ class DB:
                     SELECT 1 
                     FROM table1 t1 
                     WHERE ABS(EXTRACT(EPOCH FROM (t1.prediction_time - t2.measurement_time))) < 1
-                    AND t1.sensor_id = t2.sensor_id
-                    AND t1.device_id = t2.device_id
                 )
                 ORDER BY t2.measurement_time
             """, min_time=min_time, max_time=max_pred_time)
@@ -112,8 +114,8 @@ class DB:
             if cursor:
                 cursor.close()
             if conn:
-                self.pool.release(conn)
-                
+                conn.close()  # Return to pool
+
     @retry_db_operation
     def fetch_new_measurements(self, last_prediction_time):
         conn = None
@@ -134,7 +136,7 @@ class DB:
                     "sensor_id": r[0],
                     "device_id": r[1],
                     "measurement_time": r[2],
-                    "data": r[3]  # Предполагаем, что data — это CLOB или BLOB с JSON
+                    "data": r[3]
                 }
                 for r in rows
             ]
@@ -142,7 +144,39 @@ class DB:
             if cursor:
                 cursor.close()
             if conn:
-                self.pool.release(conn)
+                conn.close()  # Return to pool
+
+    @retry_db_operation
+    def fetch_last_measurement_for_sensor_device_before_time(self, sensor_id: int, device_id: int, timestamp):
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT sensor_id, device_id, measurement_time, data
+                FROM table2
+                WHERE sensor_id = :sensor_id
+                  AND device_id = :device_id
+                  AND measurement_time < :timestamp
+                ORDER BY measurement_time DESC
+                FETCH FIRST 1 ROW ONLY
+            """, sensor_id=sensor_id, device_id=device_id, timestamp=timestamp)
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "sensor_id": row[0],
+                    "device_id": row[1],
+                    "measurement_time": row[2],
+                    "data": row[3]
+                }
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()  # Return to pool
 
     @retry_db_operation
     def insert_prediction(self, sensor_id, device_id, param1, param2, result):
@@ -166,4 +200,4 @@ class DB:
             if cursor:
                 cursor.close()
             if conn:
-                self.pool.release(conn)
+                conn.close()  # Return to pool

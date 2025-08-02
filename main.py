@@ -39,28 +39,59 @@ def main():
         if new_sensor_detected:
             logger.info(f"Sensor changed from {current_sensor} to {measurements[0].sensor_id}")
 
-            # Проверяем, есть ли минимум по одному измерению от 2 разных устройств
-            devices = {m.device_id for m in measurements if m.sensor_id == measurements[0].sensor_id}
-            if len(devices) < 2:
-                logger.warning("Not enough devices after sensor change. Exiting without prediction.")
+            new_sensor_id = measurements[0].sensor_id
+
+            # Шаг 1: Собираем первые (или любые) измерения на НОВОМ сенсоре по одному на устройство
+            new_measurements_by_device = {}
+            for m in measurements:
+                if m.sensor_id == new_sensor_id:
+                    # Берём первое встреченное измерение для устройства
+                    if m.device_id not in new_measurements_by_device:
+                        new_measurements_by_device[m.device_id] = m
+
+            if len(new_measurements_by_device) < 2:
+                logger.warning(f"Not enough devices on new sensor {new_sensor_id}: {len(new_measurements_by_device)} < 2")
                 return
 
-            # Получаем последние измерения со старым сенсором (по одному на устройство)
-            old_measurements = []
-            for device_id in devices:
-                # Здесь нужно запросить последнее измерение по старому сенсору и устройству
-                # Заглушка:
-                old_m = MeasurementData(
+            logger.info(f"Found {len(new_measurements_by_device)} devices on new sensor: {sorted(new_measurements_by_device.keys())}")
+
+            # Шаг 2: Для каждого устройства из new_measurements_by_device — ищем последнее измерение на СТАРОМ сенсоре
+            old_measurements_by_device = {}
+            for device_id in new_measurements_by_device:
+                old_m = fetcher.get_last_measurement_for_sensor_device_before(
                     sensor_id=current_sensor,
                     device_id=device_id,
-                    measurement_time=last_pred["prediction_time"],
-                    raw_data=[{"ts": list(range(5000)), "feat1": [0.1]*5000, "feat2": [0.2]*5000}]
+                    timestamp=last_pred["prediction_time"]
                 )
-                old_measurements.append(old_m)
+                if old_m is not None:
+                    old_measurements_by_device[device_id] = old_m
+                else:
+                    logger.warning(f"No old measurement found for device {device_id} on sensor {current_sensor}")
 
-            # Определяем новые param1, param2
-            param1, param2 = detect_measurement_shift(old_measurements)
-            logger.info(f"New params after sensor change: param1={param1}, param2={param2}")
+            # Шаг 3: Определяем общие устройства (те, у которых есть данные на обоих сенсорах)
+            common_devices = set(old_measurements_by_device.keys()) & set(new_measurements_by_device.keys())
+            if len(common_devices) < 2:
+                logger.warning(
+                    f"Insufficient devices with data on both sensors. "
+                    f"Only {len(common_devices)} devices have data on both old and new sensor. Need at least 2."
+                )
+                return
+
+            logger.info(f"Valid device pairs found on both sensors: {sorted(common_devices)}")
+
+            # Шаг 4: Формируем согласованные списки: по одному измерению на устройство
+            # Важно: порядок должен быть одинаковым в обоих списках
+            sorted_devices = sorted(common_devices)
+            old_measurements = [old_measurements_by_device[dev] for dev in sorted_devices]
+            new_measurements = [new_measurements_by_device[dev] for dev in sorted_devices]
+
+            # Шаг 5: Выполняем детектирование сдвига
+            try:
+                param1, param2 = detect_measurement_shift(old_measurements, new_measurements)
+                logger.info(f"New params after sensor change: param1={param1}, param2={param2}")
+            except Exception as e:
+                logger.error(f"Failed to detect measurement shift: {e}")
+                return
 
         # Обработка измерений
         for measurement in measurements:
